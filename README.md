@@ -83,7 +83,7 @@ Generic example:
 			"command": "vivado-mcp",
 			"args": [],
 			"env": {
-				"VIVADO_BAT_PATH": "C:\\Xilinx\\Vivado\\2025.2\\bin\\vivado.bat"
+				"VIVADO_BAT_PATH": "C:\\VIVADO\\2025.2\\Vivado\\bin\\vivado.bat"
 			}
 		}
 	}
@@ -99,7 +99,7 @@ If your client runs inside this repository, you can also use:
 			"command": "uv",
 			"args": ["run", "vivado-mcp"],
 			"env": {
-				"VIVADO_BAT_PATH": "C:\\Xilinx\\Vivado\\2025.2\\bin\\vivado.bat"
+				"VIVADO_BAT_PATH": "C:\\VIVADO\\2025.2\\Vivado\\bin\\vivado.bat"
 			}
 		}
 	}
