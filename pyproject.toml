@@ -1,0 +1,56 @@
+[project]
+name = "vivado-mcp-win"
+version = "0.1.0"
+description = "Windows-native MCP server for AMD/Xilinx Vivado (subprocess-based, no pexpect)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Emmanuel Clearfield" }]
+keywords = ["mcp", "vivado", "fpga", "xilinx", "tcl", "windows"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+
+dependencies = [
+    "mcp>=1.2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/vivado-mcp-win"
+Repository = "https://github.com/your-org/vivado-mcp-win"
+Issues = "https://github.com/your-org/vivado-mcp-win/issues"
+
+[project.scripts]
+vivado-mcp = "vivado_mcp.server:run"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6.0",
+    "pytest>=8.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vivado_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
