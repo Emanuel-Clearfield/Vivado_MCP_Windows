@@ -8,3 +8,13 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Vivado crash dumps / runtime reports (kept locally under _debug/)
+_debug/
+hs_err_pid*.log
+hs_err_pid*.dmp
+dfx_runtime.txt
