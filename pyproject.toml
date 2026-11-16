@@ -22,9 +22,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/vivado-mcp-win"
-Repository = "https://github.com/your-org/vivado-mcp-win"
-Issues = "https://github.com/your-org/vivado-mcp-win/issues"
+Homepage = "https://github.com/Emanuel-Clearfield/Vivado_MCP_Windows"
+Repository = "https://github.com/Emanuel-Clearfield/Vivado_MCP_Windows"
+Issues = "https://github.com/Emanuel-Clearfield/Vivado_MCP_Windows/issues"
 
 [project.scripts]
 vivado-mcp = "vivado_mcp.server:run"
@@ -54,3 +54,7 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -13,6 +13,19 @@ background daemon thread that reads stdout one character at a time and feeds a
 thread-safe `queue.Queue`. The main thread drains that queue and aggregates
 output until it observes the Vivado prompt, at which point the command is known
 to have completed.
+
+Window visibility
+-----------------
+By default the Vivado process is launched with ``CREATE_NO_WINDOW`` so no CMD
+window appears. Pass ``show_window=True`` to ``VivadoSession`` (or the
+``start_session`` MCP tool) to make the window visible — useful for debugging
+or when you want the user to see activity in real time.
+
+Logging
+-------
+Every command and its result is appended to a rotating ``.jsonl`` log file via
+:class:`~vivado_mcp.session_logger.SessionLogger`. Pass ``log_dir`` to control
+where logs are written (default: ``~/.vivado_mcp/logs/``).
 """
 
 from __future__ import annotations
@@ -23,6 +36,8 @@ import shutil
 import subprocess
 import threading
 import time
+
+from vivado_mcp.session_logger import SessionLogger
 
 # CREATE_NO_WINDOW: prevents a console window from popping up on Windows when
 # spawning vivado.bat. Defined explicitly so the module also imports cleanly on
@@ -50,6 +65,22 @@ class VivadoSession:
 
     A Vivado cold start costs ~30s, so we keep one process alive and stream
     TCL commands into its stdin, reading results back off a background queue.
+
+    Parameters
+    ----------
+    vivado_path:
+        Explicit path to ``vivado.bat``. Falls back to ``VIVADO_BAT_PATH``
+        env var, then PATH, then a hard-coded default.
+    startup_timeout:
+        Seconds to wait for the first Vivado prompt after launch.
+    command_timeout:
+        Default seconds to wait for each TCL command to complete.
+    show_window:
+        If ``True``, the Vivado CMD window is visible to the user.
+        Default ``False`` (silent background process).
+    log_dir:
+        Directory for per-session ``.jsonl`` command logs. Defaults to
+        ``~/.vivado_mcp/logs/``. Set to ``None`` to disable logging.
     """
 
     def __init__(
@@ -57,10 +88,16 @@ class VivadoSession:
         vivado_path: str | None = None,
         startup_timeout: float = 120.0,
         command_timeout: float = 300.0,
+        show_window: bool = False,
+        log_dir: str | None = None,
+        project: str | None = None,
     ) -> None:
         self.vivado_path = self._resolve_vivado_path(vivado_path)
         self.startup_timeout = startup_timeout
         self.command_timeout = command_timeout
+        self.show_window = show_window
+        self.project = project
+        self._log_dir = log_dir  # None means use SessionLogger default
 
         self._proc: subprocess.Popen | None = None
         self._queue: queue.Queue[str] = queue.Queue()
@@ -68,6 +105,7 @@ class VivadoSession:
         self._lock = threading.Lock()
         self._started_at: float | None = None
         self._commands_run = 0
+        self._logger: SessionLogger | None = None
 
     @staticmethod
     def _resolve_vivado_path(vivado_path: str | None) -> str:
@@ -81,8 +119,16 @@ class VivadoSession:
         if on_path := shutil.which("vivado.bat") or shutil.which("vivado"):
             return on_path
 
-        # Keep a common fallback for Windows installs.
-        return r"C:\VIVADO\2025.2\Vivado\bin\vivado.bat"
+        # Check common Windows install paths
+        candidates = [
+            r"C:\AMDDesignTools\2025.2\Vivado\bin\vivado.bat",
+            r"C:\VIVADO\2025.2\Vivado\bin\vivado.bat",
+            r"C:\Xilinx\Vivado\2025.2\bin\vivado.bat",
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+        return candidates[0]
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -101,12 +147,19 @@ class VivadoSession:
                     f"Vivado executable not found at: {self.vivado_path}"
                 )
 
-            # creationflags is only meaningful on Windows; guard for portability.
-            creationflags = CREATE_NO_WINDOW if os.name == "nt" else 0
+            # Build Windows creation flags based on window visibility preference.
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = (
+                    subprocess.CREATE_NEW_CONSOLE
+                    if self.show_window
+                    else CREATE_NO_WINDOW
+                )
 
             try:
                 self._proc = subprocess.Popen(
                     [self.vivado_path, *VIVADO_ARGS],
+                    cwd=os.path.dirname(self.vivado_path),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,  # fold stderr into stdout stream
@@ -120,6 +173,15 @@ class VivadoSession:
                 raise VivadoSessionError(f"Failed to launch Vivado: {exc}") from exc
 
             self._started_at = time.time()
+
+            # Initialise the logger now that we have a PID.
+            self._logger = SessionLogger(
+                backend="pipe",
+                log_dir=self._log_dir,
+                vivado_path=self.vivado_path,
+                pid=self._proc.pid,
+                project=self.project,
+            )
 
             # Spin up the background reader BEFORE waiting for the prompt.
             self._reader = threading.Thread(
@@ -144,6 +206,9 @@ class VivadoSession:
             except Exception:
                 self._proc.kill()
             finally:
+                if self._logger:
+                    self._logger.log_session_end()
+                    self._logger = None
                 self._proc = None
                 self._started_at = None
 
@@ -223,6 +288,10 @@ class VivadoSession:
         command = command.rstrip("\n")
         timeout = timeout if timeout is not None else self.command_timeout
 
+        t0 = time.monotonic()
+        error_msg: str | None = None
+        output: str = ""
+
         with self._lock:
             assert self._proc and self._proc.stdin
             try:
@@ -231,10 +300,25 @@ class VivadoSession:
             except (BrokenPipeError, OSError) as exc:
                 raise VivadoSessionError(f"Failed to write command: {exc}") from exc
 
-            raw = self._wait_for_prompt(timeout=timeout)
-            self._commands_run += 1
+            try:
+                raw = self._wait_for_prompt(timeout=timeout)
+                self._commands_run += 1
+                output = self._sanitize(raw, command)
+            except VivadoSessionError as exc:
+                error_msg = str(exc)
+                raise
+            finally:
+                duration_ms = (time.monotonic() - t0) * 1000
+                if self._logger:
+                    self._logger.log_command(
+                        command=command,
+                        status="error" if error_msg else "ok",
+                        output=None if error_msg else output,
+                        error=error_msg,
+                        duration_ms=duration_ms,
+                    )
 
-        return self._sanitize(raw, command)
+        return output
 
     @staticmethod
     def _sanitize(raw: str, command: str) -> str:
@@ -260,15 +344,26 @@ class VivadoSession:
 
         return "\n".join(lines).strip()
 
+    def set_project(self, project_name: str) -> None:
+        """Explicitly switch active FPGA project name for logging."""
+        self.project = project_name
+        if self._logger:
+            self._logger.set_project(project_name)
+
     # ------------------------------------------------------------------ #
     # Introspection
     # ------------------------------------------------------------------ #
     def status(self) -> dict:
         uptime = time.time() - self._started_at if self._started_at else 0.0
-        return {
+        base = {
             "alive": self.is_alive(),
             "vivado_path": self.vivado_path,
             "pid": self._proc.pid if self._proc else None,
             "uptime_seconds": round(uptime, 1),
             "commands_run": self._commands_run,
+            "show_window": self.show_window,
+            "project": self._logger.project if self._logger else self.project,
         }
+        if self._logger:
+            base["log"] = self._logger.summary()
+        return base
