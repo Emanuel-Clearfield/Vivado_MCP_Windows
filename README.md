@@ -66,20 +66,53 @@ client loads the new tools.
 
 ## MCP client configuration
 
+* You must insert the directory of where you installd the vivado-mcp server
 ```json
 {
 	"mcpServers": {
 		"vivado": {
 			"command": "uv",
-			"args": ["run", "vivado-mcp"],
+			"args": ["run",
+			"--directory",
+            "DIRECTORY TO THE VIVADO MCP FOLDER",
+			 "vivado-mcp"],
 			"env": {
-				"VIVADO_BAT_PATH": "C:\\AMDDesignTools\\2025.2\\Vivado\\bin\\vivado.bat",
-				"VIVADO_SHOW_WINDOW": "0"
+				"VIVADO_BAT_PATH": "C:/AMDDesignTools/2025.2/Vivado/bin/vivado.bat"
 			}
 		}
 	}
 }
 ```
+
+### Optional: document search (RAG)
+
+The agent can search reference PDFs (board user guides, datasheets) through `search_docs`.
+Everything lives in this project's `rag/` folder: `config.yaml` (tracked), `sources/` for the
+PDFs and `db/` for the LanceDB database (both git-ignored).
+
+1. Install the extra once: `uv sync --extra rag`.
+2. Start the embedding model named in `rag/config.yaml` (default: `bge-base-en-v1.5-fp16-ov`
+   on OVMS at `http://localhost:8000`, OpenAI-compatible `/v1/embeddings`).
+3. Put PDFs in `rag/sources/` and build the database:
+
+```bash
+uv run --extra rag vivado-docs ingest rag/sources
+```
+
+4. Add `"--extra", "rag"` before `"vivado-mcp"` in the MCP client `args` and restart it.
+
+The same embedding model must be used for ingesting and searching; after changing it, delete
+`rag/db` and ingest again. `vivado-docs list`, `remove <file>`, `reindex` and `config` manage
+the database. To query it from a terminal (same search as the agent's `search_docs`):
+
+```bash
+uv run --extra rag vivado-docs search "ZedBoard 100 MHz clock pin" -k 5
+```
+
+`-s <file>` limits it to one document, `--json` prints the raw result, and
+`vivado-docs page <file> <page>` prints a whole page. `VIVADO_MCP_RAG_CONFIG` points at a different config file if needed.
+Embeddings come only from a local server (OVMS; LM Studio and Ollama also work); no cloud
+service or API key is used.
 
 ## Tools
 
@@ -112,11 +145,25 @@ Operating rules (Vivado's Tcl loop is single-threaded):
 - There is no way to cancel a running Vivado command except `stop_session`, which kills the process (a new session is then needed).
 - A Vivado `ERROR` aborts the rest of that command.
 
+### Board programming (Hardware Manager)
+- `list_hw_devices(hw_server_url?)`: connect to `hw_server` (launched by Vivado on first use, ~30 s) and list JTAG targets and devices: name, part, `is_fpga` (false for the Zynq `arm_dap_*` debug port) and `done` (DONE pin). Read-only.
+- `program_device(bitstream?, device?, probes?, run="impl_1", target?, hw_server_url?)`: program the FPGA over JTAG. Without `bitstream` it uses the newest `.bit` of the open project's `impl_1` run and reports `run_status` / `run_needs_refresh`. The ARM debug port is skipped automatically; `device` / `target` are only needed for multi-FPGA chains or several cables. Returns `done: true` when the design is running. Programming is volatile; flash and SD card are not touched.
+
+Both run as background jobs like `run_tcl_command` (`status: running` + `job_id` if the connect takes longer than `wait`).
+
 ### Simulation and artifact inspection
 - `close_simulation`: clear active simulation snapshots before a rerun.
 - `run_simulation`: configure `sim_1`, launch behavioral or post-synthesis simulation (Vivado 2025.2 syntax), wait for completion, parse common PASS/FAIL markers.
 - `list_project_artifacts`, `read_project_artifact`: browse and read bounded files under a project's `.runs` / `.sim` directories (paths cannot escape the project).
 - `summarize_simulation_logs`: parse PASS/FAIL markers from existing logs.
+
+### Document search (optional, see "Optional: document search" above)
+Read-only search of the `rag/` knowledge base. The tools return matching text with source file and page; they do not generate an answer, the agent does that.
+- `search_docs(query, top_k?, source_file?)`: hybrid vector + full-text search merged by weighted reciprocal rank fusion. Falls back to vector-only, with a `note`, when the full-text index is missing.
+- `list_docs()`: documents in the database (chunks, page range) and the config in use.
+- `read_doc_page(source_file, page_number)`: all stored text of one page, to read around a hit.
+
+New documents ingested with `vivado-docs` are visible on the next call without restarting the server.
 
 ### Per-project command logging
 - `set_active_project`, `get_project_command_history`, `list_logged_projects`.
@@ -140,6 +187,7 @@ Projects are detected automatically from `open_project` / `create_project`, or s
 | `VIVADO_SHOW_WINDOW` | `1` = visible Vivado console by default |
 | `VIVADO_MCP_LOG_DIR` | where logs and the attach state file are kept |
 | `VIVADO_TCL_SERVER_HOST` / `_PORT` | loopback address of the Tcl server (default `127.0.0.1:9877`) |
+| `VIVADO_MCP_RAG_CONFIG` | document-search config file or folder (default `rag/config.yaml`) |
 
 The token (`VIVADO_TCL_SERVER_TOKEN`) is generated per session and passed to Vivado automatically.
 

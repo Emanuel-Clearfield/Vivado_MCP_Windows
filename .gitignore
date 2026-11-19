@@ -18,3 +18,8 @@ _debug/
 hs_err_pid*.log
 hs_err_pid*.dmp
 dfx_runtime.txt
+
+# Document knowledge base: config is tracked; PDFs and database stay local
+rag/db/
+rag/sources/*
+!rag/sources/.gitkeep

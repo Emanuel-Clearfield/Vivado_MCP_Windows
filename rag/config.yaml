@@ -1,0 +1,25 @@
+# Document search (search_docs / list_docs / read_doc_page) configuration.
+# Relative paths are resolved against this folder. Override the location of this file
+# with the environment variable VIVADO_MCP_RAG_CONFIG.
+#
+# Build the database:   uv run --extra rag vivado-docs ingest rag/sources
+# The SAME embedding model must be used for ingestion and for searching; after changing
+# it, delete rag/db and ingest again.
+
+embedding:
+  backend: ovms            # "ovms" (OpenAI-compatible /v1/embeddings) | "lmstudio" | "ollama"
+  model: OpenVINO/bge-base-en-v1.5-fp16-ov
+  base_url: http://localhost:8000
+
+retrieval:
+  top_k: 8
+  use_hybrid: true         # vector + full-text search
+  fts_weight: 0.3          # weight of the full-text rank in the fusion
+
+chunking:
+  chunk_size: 512          # characters
+  chunk_overlap: 64
+
+database:
+  path: db
+  table_name: documents

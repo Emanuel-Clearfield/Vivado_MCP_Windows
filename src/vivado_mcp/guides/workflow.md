@@ -63,13 +63,17 @@ wait_on_run impl_1
 Output: `<proj>.runs/impl_1/<top>.bit`.
 
 ## 7. Program the board
-```tcl
-open_hw_manager
-connect_hw_server
-open_hw_target
-set_property PROGRAM.FILE C:/work/my_proj/my_proj.runs/impl_1/top.bit [current_hw_device]
-program_hw_devices [current_hw_device]
-```
+Use the tools, not hand-written Tcl:
+- `list_hw_devices()`: connects to hw_server (first call ~30 s) and lists the JTAG chain. On a
+  ZedBoard: `arm_dap_0` (Zynq ARM debug port, `is_fpga: false`) and `xc7z020_1` (the FPGA).
+- `program_device()`: programs the newest `.bit` of `impl_1` in the open project, or
+  `program_device(bitstream="C:/work/my_proj/my_proj.runs/impl_1/top.bit")`. It skips `arm_dap`
+  automatically, sets an optional `.ltx` probes file, and returns `done: true` when the DONE pin is high.
+  `run_needs_refresh: true` means the bitstream is older than the sources: rebuild first.
+
+Programming is volatile (lost at power-off; flash and SD card are untouched). The part in the
+project (`xc7z020clg484-1` for ZedBoard) must match the board, or `program_hw_devices` fails.
+Hand-written Tcl pitfall: on Zynq boards `[current_hw_device]` can be `arm_dap_0`, not the FPGA.
 
 ## Habits that save time
 - After every step check `status`, then read `console` for `ERROR:` and `CRITICAL WARNING:`.

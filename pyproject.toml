@@ -28,8 +28,16 @@ Issues = "https://github.com/Emanuel-Clearfield/Vivado_MCP_Windows/issues"
 
 [project.scripts]
 vivado-mcp = "vivado_mcp.server:run"
+vivado-docs = "vivado_mcp.rag_ingest:main"
 
 [project.optional-dependencies]
+# Document search (search_docs / list_docs / read_doc_page) and the vivado-docs ingest CLI.
+rag = [
+    "lancedb>=0.33.0",
+    "pyarrow>=17.0.0",
+    "pyyaml>=6.0",
+    "pymupdf>=1.24.0",
+]
 dev = [
     "ruff>=0.6.0",
     "pytest>=8.0.0",
